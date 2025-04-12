@@ -1,6 +1,6 @@
 const reciters = [
     {
-        name: "القارئ عبد الباسط عبدالصمد",
+        name: "القارئ عبدالباسط عبدالصمد",
         img: "img/Abd_Elbasit.png",
         desc: "الحنجرة الذهبية في تلاوت القرآن الكريم",
         identifier: "https://server7.mp3quran.net/basit/Almusshaf-Al-Mojawwad/",
@@ -280,7 +280,6 @@ const surahSearchInput = document.getElementById('surahSearchInput');
 const surahSearchButton = document.getElementById('surahSearchButton');
 const recitersSection = document.getElementById('recitersSection');
 const surahSection = document.getElementById('surahSection');
-const heroSection = document.getElementById('heroSection');
 const surahList = document.getElementById('surahList');
 const surahReciterName = document.getElementById('surahReciterName');
 const reciterLogoImg = document.getElementById('reciterLogoImg');
@@ -300,25 +299,43 @@ const volumeSlider = document.getElementById('volumeSlider');
 const downloadBtn = document.getElementById('downloadBtn');
 const notification = document.getElementById('notification');
 const notificationText = document.getElementById('notificationText');
+const loadingOverlay = document.getElementById('loadingOverlay');
 
 // متغيرات حالة المشغل
 let currentReciter = null;
-let currentSurahIndex = 0;
+let currentSurahIndex = -1;
 let isPlaying = false;
 let isMuted = false;
 let lastVolume = 1;
+let surahCards = [];
+let filteredSurahIndices = [];
+
+// دوال التحميل
+function showLoading() {
+    loadingOverlay.style.display = 'flex';
+}
+
+function hideLoading() {
+    loadingOverlay.style.opacity = '0';
+    setTimeout(() => {
+        loadingOverlay.style.display = 'none';
+    }, 500);
+}
 
 // عرض جميع القراء
 function displayReciters() {
-    container.innerHTML = '';
+    showLoading();
+
+    const fragment = document.createDocumentFragment();
+
     reciters.forEach(reciter => {
         const card = document.createElement('div');
         card.className = 'reciter-card';
-        card.dataset.name = reciter.name.toLowerCase();
+        card.dataset.name = reciter.name.toLowerCase().replace(/\s/g, '');
 
         card.innerHTML = `
             <div class="reciter-image-container"> 
-                <img src="${reciter.img}" alt="${reciter.name}" class="reciter-image"> 
+                <img src="${reciter.img}" alt="${reciter.name}" class="reciter-image" loading="lazy"> 
                 <button class="copy-identifier-btn" title="نسخ رابط القارئ">
                     <i class="fas fa-copy"></i>
                 </button>
@@ -328,63 +345,87 @@ function displayReciters() {
                 <p>${reciter.desc}</p> 
                 <div class="reciter-actions"> 
                     <a href="#" class="btn btn-primary listen-btn"><i class="fas fa-headphones"></i> استماع</a> 
-                    <a href="${reciter.url}" class="btn btn-outline"><i class="fas fa-download"></i> تحميل</a> 
+                    ${reciter.url ? `<a href="${reciter.url}" target="_blank" class="btn btn-outline"><i class="fas fa-download"></i> تحميل</a>` : ''}
                 </div> 
             </div>`;
 
-        container.appendChild(card);
-
-        // إضافة مستمع الحدث لزر الاستماع
         const listenBtn = card.querySelector('.listen-btn');
         listenBtn.addEventListener('click', (e) => {
             e.preventDefault();
             showSurahs(reciter);
         });
 
-        // إضافة مستمع الحدث لزر نسخ الرابط
         const copyBtn = card.querySelector('.copy-identifier-btn');
         copyBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             copyToClipboard(reciter.identifier);
             showNotification(`تم نسخ رابط القارئ ${reciter.name}`);
         });
+
+        fragment.appendChild(card);
+    });
+
+    container.innerHTML = '';
+    container.appendChild(fragment);
+
+    lazyLoadImages();
+    hideLoading();
+}
+
+// تحميل الصور بكسل
+function lazyLoadImages() {
+    const images = document.querySelectorAll('img[loading="lazy"]');
+
+    images.forEach(img => {
+        if (img.complete) {
+            img.style.opacity = '1';
+        } else {
+            img.addEventListener('load', () => {
+                img.style.opacity = '1';
+            });
+        }
     });
 }
 
 // عرض سور القارئ المحدد
 function showSurahs(reciter) {
+    showLoading();
     currentReciter = reciter;
+    currentSurahIndex = -1;
+    filteredSurahIndices = [];
     surahReciterName.textContent = reciter.name;
-    reciterLogoImg.src = reciter.img;
+    reciterLogoImg.src = reciter.img || 'https://i1.sndcdn.com/artworks-000157161960-6e0z44-t500x500.jpg';
+    reciterLogoImg.style.opacity = '0';
+    reciterLogoImg.onload = () => {
+        reciterLogoImg.style.opacity = '1';
+    };
 
-    // توليد قائمة السور
     generateSurahList();
 
-    // تبديل العرض بين الأقسام
     recitersSection.style.display = 'none';
-    heroSection.style.display = 'none';
     surahSection.style.display = 'block';
-
-    // التمرير إلى الأعلى
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    hideLoading();
 }
 
 // توليد قائمة السور
 function generateSurahList(filter = '') {
     surahList.innerHTML = '';
-    const searchTerm = filter.toLowerCase();
+    surahCards = [];
+    filteredSurahIndices = [];
+    const searchTerm = normalizeSearchText(filter.toLowerCase().replace(/\s/g, ''));
 
     surahNames.forEach((surah, index) => {
-        // تصفية السور حسب البحث
-        if (searchTerm && !surah.toLowerCase().includes(searchTerm)) {
-            return;
-        }
-
         const surahNumber = (index + 1).toString().padStart(3, '0');
         const audioUrl = `${currentReciter.identifier}${surahNumber}.mp3`;
         const surahCard = document.createElement('div');
         surahCard.className = 'surah-card';
         surahCard.dataset.index = index;
+
+        // إضافة صنف للبحث إذا كان هناك تطابق
+        const isMatch = searchTerm &&
+            normalizeSearchText(surah.toLowerCase().replace(/\s/g, ''))
+                .includes(searchTerm);
 
         surahCard.innerHTML = `
             <button class="copy-surah-btn" title="نسخ رابط السورة">
@@ -392,12 +433,19 @@ function generateSurahList(filter = '') {
             </button>
             <div class="surah-number">${index + 1}</div>
             <div class="surah-name">سورة ${surah}</div>
-            <div class="surah-play-icon"><i class="fas fa-play-circle"></i></div>
+            <div class="surah-play-icon"><i class="fas fa-play"></i></div>
         `;
+
+        if (isMatch) {
+            surahCard.classList.add('search-match');
+            // إضافة مؤقت لإزالة الصنف بعد الأنيميشن
+            setTimeout(() => {
+                surahCard.classList.remove('search-match');
+            }, 2000);
+        }
 
         surahCard.addEventListener('click', () => playSurah(index));
 
-        // إضافة مستمع الحدث لزر نسخ الرابط
         const copyBtn = surahCard.querySelector('.copy-surah-btn');
         copyBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -406,21 +454,55 @@ function generateSurahList(filter = '') {
         });
 
         surahList.appendChild(surahCard);
+        surahCards.push(surahCard);
     });
 }
 
 // تشغيل سورة محددة
 function playSurah(index) {
+    if (index < 0 || index >= surahNames.length) {
+        console.error('Invalid surah index:', index);
+        return;
+    }
+
+    if (currentSurahIndex === index) {
+        if (isPlaying) {
+            audioElement.pause();
+            isPlaying = false;
+            playBtn.innerHTML = '<i class="fas fa-play"></i>';
+            updateSurahCardIcon(index, 'play');
+        } else {
+            audioElement.play()
+                .then(() => {
+                    isPlaying = true;
+                    playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+                    updateSurahCardIcon(index, 'pause');
+                })
+                .catch(error => {
+                    console.error('Error resuming playback:', error);
+                    showNotification('حدث خطأ في استئناف التشغيل');
+                });
+        }
+        return;
+    }
+
+    if (currentSurahIndex >= 0 && surahCards[currentSurahIndex]) {
+        updateSurahCardIcon(currentSurahIndex, 'play');
+    }
+
+    showLoading();
     currentSurahIndex = index;
+    updateSurahCardIcon(index, 'pause');
+
     const surahNumber = (index + 1).toString().padStart(3, '0');
     const audioUrl = `${currentReciter.identifier}${surahNumber}.mp3`;
 
-    // تعيين مصدر الصوت
-    audioElement.src = audioUrl;
-    nowPlayingDisplay.innerHTML = `<i class="fas fa-music"></i> سورة ${surahNames[index]} - ${currentReciter.name}`;
+    nowPlayingDisplay.innerHTML = `<i class="fas fa-spinner fa-spin"></i> جارٍ تحميل سورة ${surahNames[index]}...`;
+    audioPlayer.style.display = 'block';
+    audioPlayer.classList.add('show');
 
-    // إعداد رابط التحميل
-    downloadBtn.onclick = () => {
+    downloadBtn.onclick = (e) => {
+        e.stopPropagation();
         const link = document.createElement('a');
         link.href = audioUrl;
         link.download = `تلاوة ${surahNames[index]} - ${currentReciter.name}.mp3`;
@@ -429,29 +511,63 @@ function playSurah(index) {
         document.body.removeChild(link);
     };
 
-    // إظهار مشغل الصوت
-    audioPlayer.style.display = 'block';
+    audioElement.src = '';
+    audioElement.load();
+    audioElement.src = audioUrl;
+    isPlaying = false;
+    playBtn.innerHTML = '<i class="fas fa-play"></i>';
+    audioElement.load();
 
-    // تشغيل الصوت عند التحميل
-    audioElement.addEventListener('loadedmetadata', () => {
+    audioElement.addEventListener('canplaythrough', () => {
+        nowPlayingDisplay.innerHTML = `<i class="fas fa-music"></i> سورة ${surahNames[index]} - ${currentReciter.name}`;
         durationDisplay.textContent = formatTime(audioElement.duration);
         audioElement.play()
             .then(() => {
                 isPlaying = true;
                 playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+                hideLoading();
             })
             .catch(error => {
                 console.error('Error playing audio:', error);
+                nowPlayingDisplay.innerHTML = '<i class="fas fa-exclamation-triangle"></i> حدث خطأ في تشغيل السورة';
+                showNotification('تعذر تشغيل السورة، الرجاء المحاولة لاحقاً');
+                hideLoading();
             });
     }, { once: true });
 
-    // في حالة حدوث خطأ
     audioElement.addEventListener('error', () => {
         nowPlayingDisplay.innerHTML = '<i class="fas fa-exclamation-triangle"></i> حدث خطأ في تحميل السورة';
+        showNotification('تعذر تحميل السورة، الرجاء المحاولة لاحقاً');
+        hideLoading();
     }, { once: true });
 }
 
-// تنسيق الوقت إلى دقائق وثواني
+// تحديث أيقونة بطاقة السورة
+function updateSurahCardIcon(index, action) {
+    if (index >= 0 && surahCards[index]) {
+        const card = surahCards[index];
+        const icon = card.querySelector('.surah-play-icon i');
+
+        if (action === 'play') {
+            card.classList.remove('playing');
+            icon.className = 'fas fa-play';
+        } else {
+            card.classList.add('playing');
+            icon.className = 'fas fa-pause';
+        }
+    }
+}
+
+// معالجة نص البحث (تجاهل كلمة سورة والمسافات)
+function normalizeSearchText(text) {
+    text = text.replace(/^سوره|^سورة/i, ''); // تجاهل كلمة سورة في البداية
+    text = text.replace(/\s/g, ''); // تجاهل جميع المسافات
+    text = text.replace(/[يى]/g, '[يى]');
+    text = text.replace(/[هة]/g, '[هة]');
+    return text;
+}
+
+// تنسيق الوقت
 function formatTime(seconds) {
     if (isNaN(seconds)) return "0:00";
     const mins = Math.floor(seconds / 60);
@@ -464,24 +580,22 @@ function updateProgress() {
     const { currentTime, duration } = audioElement;
     const progressPercent = (currentTime / duration) * 100;
     progressBar.style.width = `${progressPercent}%`;
+    progressSlider.value = progressPercent;
     currentTimeDisplay.textContent = formatTime(currentTime);
 }
 
-// تعيين موضع التشغيل عند النقر على شريط التقدم
+// تعيين موضع التشغيل
 function setProgress(e) {
-    const width = this.clientWidth;
-    const clickX = e.offsetX;
-    const duration = audioElement.duration;
-    audioElement.currentTime = (clickX / width) * duration;
+    progressSlider.addEventListener('input', function() {
+        const percent = this.value;
+        progressBar.style.width = `${percent}%`;
+        audioElement.currentTime = (percent / 100) * audioElement.duration;
+    });    
 }
 
-// نسخ النص إلى الحافظة
+// نسخ النص
 function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        console.log('Text copied to clipboard');
-    }).catch(err => {
-        console.error('Failed to copy text: ', err);
-        // Fallback for older browsers
+    navigator.clipboard.writeText(text).catch(err => {
         const textarea = document.createElement('textarea');
         textarea.value = text;
         document.body.appendChild(textarea);
@@ -503,43 +617,25 @@ function showNotification(message) {
 
 // البحث عن قارئ
 function searchReciter() {
-    const searchTerm = searchInput.value.trim().toLowerCase();
-    if (searchTerm === '') {
-        // إزالة أي تمييز إذا كان حقل البحث فارغاً
-        const cards = document.querySelectorAll('.reciter-card');
-        cards.forEach(card => {
-            card.classList.remove('highlight');
-        });
-        return;
-    }
-
+    const searchTerm = normalizeSearchText(searchInput.value.trim().toLowerCase());
     const cards = document.querySelectorAll('.reciter-card');
     let found = false;
 
     cards.forEach(card => {
-        // إزالة علامات "ـ" من اسم القارئ عند المقارنة
         const reciterName = card.dataset.name.replace(/ـ/g, '');
-        const searchTermWithoutTatweel = searchTerm.replace(/ـ/g, '');
+        const searchRegex = new RegExp(searchTerm, 'i');
 
-        if (reciterName.includes(searchTermWithoutTatweel)) {
-            // التمرير إلى الكارت
-            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-            // تطبيق تأثير التمييز
-            card.classList.add('highlight');
-
-            // إزالة التأثير بعد انتهاء الأنيميشن
-            setTimeout(() => {
-                card.classList.remove('highlight');
-            }, 2000);
-
-            found = true;
-        } else {
-            card.classList.remove('highlight');
+        if (searchTerm === '' || searchRegex.test(reciterName)) {
+            if (searchTerm !== '') {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.classList.add('highlight-search');
+                setTimeout(() => card.classList.remove('highlight-search'), 2000);
+                found = true;
+            }
         }
     });
 
-    if (!found) {
+    if (searchTerm && !found) {
         showNotification('لم يتم العثور على قارئ بهذا الاسم');
     }
 }
@@ -547,43 +643,117 @@ function searchReciter() {
 // البحث عن سورة
 function searchSurah() {
     const searchTerm = surahSearchInput.value.trim();
-    generateSurahList(searchTerm);
-
-    // تمييز النتائج إذا كان هناك بحث
-    if (searchTerm) {
-        const cards = document.querySelectorAll('.surah-card');
+    if (!searchTerm) return;
+    
+    const cards = document.querySelectorAll('.surah-card');
+    let found = false;
+    const normalizedSearch = normalizeSearchText(searchTerm.toLowerCase().replace(/\s/g, ''));
+    
+    // المرحلة الأولى: البحث عن تطابق كامل (بعد إزالة كلمة سورة)
+    cards.forEach(card => {
+        const surahName = card.querySelector('.surah-name').textContent;
+        const normalizedSurah = normalizeSearchText(surahName.toLowerCase().replace(/^سورة\s*/g, ''));
+        
+        if (normalizedSurah === normalizedSearch) {
+            card.classList.add('search-match');
+            if (!found) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                found = true;
+            }
+            setTimeout(() => card.classList.remove('search-match'), 2000);
+        }
+    });
+    
+    // المرحلة الثانية: إذا لم يوجد تطابق كامل، نبحث عن أي سورة تحتوي الحروف
+    if (!found) {
         cards.forEach(card => {
-            card.classList.add('highlight');
-            setTimeout(() => {
-                card.classList.remove('highlight');
-            }, 2000);
+            const surahName = card.querySelector('.surah-name').textContent;
+            const normalizedSurah = normalizeSearchText(surahName.toLowerCase().replace(/^سورة\s*/g, ''));
+            
+            if (normalizedSurah.includes(normalizedSearch)) {
+                card.classList.add('search-match');
+                if (!found) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    found = true;
+                }
+                setTimeout(() => card.classList.remove('search-match'), 2000);
+            }
         });
+    }
+    
+    // إظهار الإشعارات والاهتزاز
+    if (found) {
+        surahSearchInput.classList.add('search-success');
+        setTimeout(() => surahSearchInput.classList.remove('search-success'), 500);
+    } else {
+        showNotification('لم يتم العثور على سورة بهذا الاسم');
     }
 }
 
 // أحداث المشغل الصوتي
 playBtn.addEventListener('click', () => {
     if (audioElement.paused) {
-        audioElement.play()
-            .then(() => {
-                isPlaying = true;
-                playBtn.innerHTML = '<i class="fas fa-pause"></i>';
-            });
+        if (currentSurahIndex === -1) {
+            const firstIndex = filteredSurahIndices.length > 0 ? filteredSurahIndices[0] : 0;
+            if (firstIndex >= 0) {
+                playSurah(firstIndex);
+            }
+        } else {
+            audioElement.play()
+                .then(() => {
+                    isPlaying = true;
+                    playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+                    if (currentSurahIndex >= 0) {
+                        updateSurahCardIcon(currentSurahIndex, 'pause');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error resuming playback:', error);
+                    showNotification('حدث خطأ في استئناف التشغيل');
+                });
+        }
     } else {
         audioElement.pause();
         isPlaying = false;
         playBtn.innerHTML = '<i class="fas fa-play"></i>';
+        if (currentSurahIndex >= 0) {
+            updateSurahCardIcon(currentSurahIndex, 'play');
+        }
     }
 });
 
 prevBtn.addEventListener('click', () => {
-    if (currentSurahIndex > 0) {
+    if (currentSurahIndex <= 0) {
+        showNotification('هذه أول سورة في القائمة');
+        return;
+    }
+
+    if (filteredSurahIndices.length > 0) {
+        const currentIndexInFiltered = filteredSurahIndices.indexOf(currentSurahIndex);
+        if (currentIndexInFiltered > 0) {
+            playSurah(filteredSurahIndices[currentIndexInFiltered - 1]);
+        } else {
+            showNotification('هذه أول سورة في نتائج البحث');
+        }
+    } else {
         playSurah(currentSurahIndex - 1);
     }
 });
 
 nextBtn.addEventListener('click', () => {
-    if (currentSurahIndex < surahNames.length - 1) {
+    if (currentSurahIndex >= surahNames.length - 1) {
+        showNotification('هذه آخر سورة في القائمة');
+        return;
+    }
+
+    if (filteredSurahIndices.length > 0) {
+        const currentIndexInFiltered = filteredSurahIndices.indexOf(currentSurahIndex);
+        if (currentIndexInFiltered < filteredSurahIndices.length - 1) {
+            playSurah(filteredSurahIndices[currentIndexInFiltered + 1]);
+        } else {
+            showNotification('هذه آخر سورة في نتائج البحث');
+        }
+    } else {
         playSurah(currentSurahIndex + 1);
     }
 });
@@ -608,6 +778,9 @@ volumeSlider.addEventListener('input', () => {
     if (audioElement.volume > 0) {
         isMuted = false;
         volumeBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
+    } else {
+        isMuted = true;
+        volumeBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
     }
 });
 
@@ -617,8 +790,18 @@ audioElement.addEventListener('ended', () => {
     isPlaying = false;
     playBtn.innerHTML = '<i class="fas fa-play"></i>';
 
-    // الانتقال تلقائياً للسورة التالية
-    if (currentSurahIndex < surahNames.length - 1) {
+    if (currentSurahIndex >= 0) {
+        updateSurahCardIcon(currentSurahIndex, 'play');
+    }
+
+    if (filteredSurahIndices.length > 0) {
+        const currentIndexInFiltered = filteredSurahIndices.indexOf(currentSurahIndex);
+        if (currentIndexInFiltered < filteredSurahIndices.length - 1) {
+            setTimeout(() => {
+                playSurah(filteredSurahIndices[currentIndexInFiltered + 1]);
+            }, 2000);
+        }
+    } else if (currentSurahIndex < surahNames.length - 1) {
         setTimeout(() => {
             playSurah(currentSurahIndex + 1);
         }, 2000);
@@ -631,12 +814,18 @@ progressContainer.addEventListener('click', setProgress);
 backBtn.addEventListener('click', (e) => {
     e.preventDefault();
     recitersSection.style.display = 'block';
-    heroSection.style.display = 'block';
     surahSection.style.display = 'none';
-    audioPlayer.style.display = 'none';
+    audioPlayer.classList.remove('show');
+    setTimeout(() => {
+        audioPlayer.style.display = 'none';
+    }, 300);
     audioElement.pause();
     isPlaying = false;
     playBtn.innerHTML = '<i class="fas fa-play"></i>';
+
+    if (currentSurahIndex >= 0) {
+        updateSurahCardIcon(currentSurahIndex, 'play');
+    }
 });
 
 // أحداث البحث
@@ -654,5 +843,17 @@ surahSearchInput.addEventListener('keypress', (e) => {
     }
 });
 
-// عرض القراء عند تحميل الصفحة
-displayReciters();
+// تحميل الصفحة
+window.addEventListener('load', () => {
+    displayReciters();
+
+    const lazyImages = document.querySelectorAll('img[loading="lazy"]');
+    lazyImages.forEach(img => {
+        img.addEventListener('load', () => {
+            img.style.opacity = '1';
+        });
+        if (img.complete) {
+            img.style.opacity = '1';
+        }
+    });
+});
